@@ -991,29 +991,38 @@ function loadSample() {
 const SB_CFG_KEY = 'karnehan-pos:supabase:cfg:v1';
 const SB_LAST_KEY = 'karnehan-pos:supabase:last:v1';
 
-const SQL_SCHEMA = `-- Run this in Supabase Dashboard > SQL Editor:
-create table if not exists public.meat_pos_backups (
-  id uuid primary key default gen_random_uuid(),
-  created_at timestamptz not null default now(),
-  device_name text default 'Browser POS',
-  customer_count integer not null default 0,
-  sale_count integer not null default 0,
-  total_receivables numeric(12,2) not null default 0,
-  payload jsonb not null
+const DEFAULT_SB_URL = 'https://pxfjvayzucpqljozpvna.supabase.co';
+const DEFAULT_SB_KEY = 'sb_publishable_9JUOaxzxaJszZ-FhNwXq7w_bOqKtFYI';
+
+const SQL_SCHEMA = `-- Configured in your Supabase project:
+CREATE TABLE IF NOT EXISTS public.meat_pos_backups (
+    id TEXT PRIMARY KEY DEFAULT 'current',
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    data JSONB NOT NULL
 );
 
-alter table public.meat_pos_backups enable row level security;
+ALTER TABLE public.meat_pos_backups ENABLE ROW LEVEL SECURITY;
 
-create policy "Allow anon insert backups" on public.meat_pos_backups for insert to anon, authenticated with check (true);
-create policy "Allow anon select backups" on public.meat_pos_backups for select to anon, authenticated using (true);
-create policy "Allow anon delete backups" on public.meat_pos_backups for delete to anon, authenticated using (true);`;
+CREATE POLICY "Allow public select" ON public.meat_pos_backups FOR SELECT USING (true);
+CREATE POLICY "Allow public insert" ON public.meat_pos_backups FOR INSERT WITH CHECK (true);
+CREATE POLICY "Allow public update" ON public.meat_pos_backups FOR UPDATE USING (true);`;
 
 function loadSbCfg() {
   try {
-    return JSON.parse(localStorage.getItem(SB_CFG_KEY)) || { url: '', key: '', autoSync: false };
-  } catch {
-    return { url: '', key: '', autoSync: false };
-  }
+    const saved = JSON.parse(localStorage.getItem(SB_CFG_KEY));
+    if (saved && saved.url && saved.key) {
+      return {
+        url: saved.url,
+        key: saved.key,
+        autoSync: saved.autoSync ?? true,
+      };
+    }
+  } catch {}
+  return {
+    url: DEFAULT_SB_URL,
+    key: DEFAULT_SB_KEY,
+    autoSync: true,
+  };
 }
 
 let sbCfg = loadSbCfg();
@@ -1081,18 +1090,17 @@ async function backupToSupabase(silent = false) {
     app: 'karnehan-pos',
     version: 1,
     savedAt: new Date().toISOString(),
+    device_name: navigator.userAgent.includes('Mobile') ? 'Mobile Phone' : 'Desktop POS',
+    customer_count: db.customers.length,
+    sale_count: db.txns.length,
+    total_receivables: totalReceivables() / 100,
     customers: db.customers,
     txns: db.txns,
     prices: db.prices || {},
   };
 
-  const body = {
-    device_name: navigator.userAgent.includes('Mobile') ? 'Mobile Phone' : 'Desktop POS',
-    customer_count: db.customers.length,
-    sale_count: db.txns.length,
-    total_receivables: totalReceivables() / 100,
-    payload: snapshot,
-  };
+  const nowIso = new Date().toISOString();
+  const snapshotId = `backup-${Date.now()}`;
 
   try {
     const res = await fetch(endpoint, {
@@ -1103,7 +1111,11 @@ async function backupToSupabase(silent = false) {
         'Content-Type': 'application/json',
         'Prefer': 'return=representation',
       },
-      body: JSON.stringify(body),
+      body: JSON.stringify({
+        id: snapshotId,
+        updated_at: nowIso,
+        data: snapshot,
+      }),
     });
 
     if (!res.ok) {
@@ -1111,7 +1123,23 @@ async function backupToSupabase(silent = false) {
       throw new Error(errText || `HTTP ${res.status}`);
     }
 
-    sbLastBackup = new Date().toISOString();
+    // Keep 'current' record updated for fast sync/restore
+    fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': sbCfg.key,
+        'Authorization': `Bearer ${sbCfg.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'resolution=merge-duplicates',
+      },
+      body: JSON.stringify({
+        id: 'current',
+        updated_at: nowIso,
+        data: snapshot,
+      }),
+    }).catch(() => {});
+
+    sbLastBackup = nowIso;
     localStorage.setItem(SB_LAST_KEY, sbLastBackup);
     renderSbStatus();
     if (!silent) toast('☁️ Backed up successfully to Supabase!', 'success');
@@ -1140,7 +1168,7 @@ async function loadSbSnapshots() {
   }
 
   listEl.innerHTML = '<li class="text-xs text-stone-500 py-2">Loading cloud backups…</li>';
-  const endpoint = `${sbCfg.url.replace(/\/+$/, '')}/rest/v1/meat_pos_backups?select=id,created_at,device_name,customer_count,sale_count,total_receivables&order=created_at.desc&limit=10`;
+  const endpoint = `${sbCfg.url.replace(/\/+$/, '')}/rest/v1/meat_pos_backups?select=id,updated_at,data&order=updated_at.desc&limit=15`;
 
   try {
     const res = await fetch(endpoint, {
@@ -1152,24 +1180,35 @@ async function loadSbSnapshots() {
 
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const rows = await res.json();
-    if (countBadge) countBadge.textContent = `${rows.length} snapshot${rows.length === 1 ? '' : 's'}`;
+    const displayRows = rows.filter((r) => r.id !== 'current');
+    const finalRows = displayRows.length ? displayRows : rows;
 
-    if (!rows.length) {
+    if (countBadge) countBadge.textContent = `${finalRows.length} snapshot${finalRows.length === 1 ? '' : 's'}`;
+
+    if (!finalRows.length) {
       listEl.innerHTML = '<li class="text-xs text-stone-400 py-3 text-center rounded-xl bg-stone-100">No cloud backups found yet. Tap "Backup Now" above.</li>';
       return;
     }
 
-    listEl.innerHTML = rows.map((r) => `
-      <li class="flex items-center justify-between gap-2 rounded-xl border border-stone-200 bg-white p-3 text-xs">
-        <div class="min-w-0">
-          <p class="font-bold text-stone-800">${fmtDate(r.created_at)}</p>
-          <p class="text-[11px] text-stone-500">${esc(r.device_name || 'POS')} · ${r.customer_count} customers · ${r.sale_count} sales · ₱${Number(r.total_receivables).toFixed(2)} debt</p>
-        </div>
-        <button type="button" data-act="sb-restore" data-id="${r.id}" class="rounded-lg bg-stone-100 px-3 py-1.5 font-bold text-stone-700 hover:bg-emerald-50 hover:text-emerald-800 active:scale-95">
-          Restore
-        </button>
-      </li>
-    `).join('');
+    listEl.innerHTML = finalRows.map((r) => {
+      const d = r.data || {};
+      const dev = d.device_name || (r.id === 'current' ? 'Latest Sync' : 'POS Backup');
+      const custs = d.customer_count ?? (d.customers?.length || 0);
+      const sales = d.sale_count ?? (d.txns?.length || 0);
+      const debt = d.total_receivables != null ? Number(d.total_receivables).toFixed(2) : '0.00';
+      const timeStr = r.updated_at ? fmtDate(r.updated_at) : 'Recent';
+      return `
+        <li class="flex items-center justify-between gap-2 rounded-xl border border-stone-200 bg-white p-3 text-xs">
+          <div class="min-w-0">
+            <p class="font-bold text-stone-800">${timeStr}</p>
+            <p class="text-[11px] text-stone-500">${esc(dev)} · ${custs} customers · ${sales} sales · ₱${debt} debt</p>
+          </div>
+          <button type="button" data-act="sb-restore" data-id="${r.id}" class="rounded-lg bg-stone-100 px-3 py-1.5 font-bold text-stone-700 hover:bg-emerald-50 hover:text-emerald-800 active:scale-95">
+            Restore
+          </button>
+        </li>
+      `;
+    }).join('');
   } catch (err) {
     listEl.innerHTML = `<li class="text-xs text-red-600 py-2">Could not load backups: ${esc(err.message)}</li>`;
   }
@@ -1178,7 +1217,7 @@ async function loadSbSnapshots() {
 async function restoreFromSupabase(id) {
   if (!confirm('Restore this cloud backup? Your current local data will be replaced by the snapshot.')) return;
 
-  const endpoint = `${sbCfg.url.replace(/\/+$/, '')}/rest/v1/meat_pos_backups?id=eq.${id}&select=payload`;
+  const endpoint = `${sbCfg.url.replace(/\/+$/, '')}/rest/v1/meat_pos_backups?id=eq.${id}&select=data`;
   try {
     const res = await fetch(endpoint, {
       headers: {
@@ -1188,9 +1227,9 @@ async function restoreFromSupabase(id) {
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const rows = await res.json();
-    if (!rows.length || !rows[0].payload) throw new Error('Backup payload missing');
+    if (!rows.length || !rows[0].data) throw new Error('Backup data missing');
 
-    const d = rows[0].payload;
+    const d = rows[0].data;
     if (!Array.isArray(d.customers) || !Array.isArray(d.txns)) throw new Error('Invalid backup format');
 
     db = { customers: d.customers, txns: d.txns, prices: d.prices || {} };
