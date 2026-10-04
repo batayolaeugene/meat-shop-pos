@@ -72,6 +72,7 @@ function save() {
     toast('⚠️ Could not save — storage may be full. Export a backup now.', 'error');
   }
   renderSaveStatus();
+  scheduleAutoBackup();
 }
 
 const today = new Date();
@@ -181,9 +182,10 @@ function toast(msg, type = 'info') {
 function renderSaveStatus() {
   const el = $('#save-status');
   const net = navigator.onLine ? '' : 'Offline · ';
+  const cloud = sbCfg?.url && sbCfg?.key ? ' · ☁️ Supabase' : '';
   el.textContent = lastSaved
-    ? `${net}Saved locally ${lastSaved.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}`
-    : `${net}Saved on this device`;
+    ? `${net}Saved locally ${lastSaved.toLocaleTimeString('en-PH', { hour: 'numeric', minute: '2-digit' })}${cloud}`
+    : `${net}Saved on this device${cloud}`;
 }
 
 // ───────────────────────── Render: header / summary ─────────────────────────
@@ -455,10 +457,11 @@ const saleDlg = $('#sale-dialog');
 const payDlg = $('#pay-dialog');
 const detailDlg = $('#detail-dialog');
 const menuDlg = $('#menu-dialog');
+const sbDlg = $('#supabase-dialog');
 
 // Light-dismiss fallback for browsers without <dialog closedby> (e.g. Safari).
 if (!('closedBy' in HTMLDialogElement.prototype)) {
-  for (const d of [payDlg, detailDlg, menuDlg]) {
+  for (const d of [payDlg, detailDlg, menuDlg, sbDlg]) {
     d.addEventListener('click', (e) => {
       if (e.target !== d) return;
       const r = d.getBoundingClientRect();
@@ -984,8 +987,304 @@ function loadSample() {
   toast('Sample data loaded — try “All Debts” and Customer Ledgers', 'success');
 }
 
+// ───────────────────────── Supabase Cloud Backup ─────────────────────────
+const SB_CFG_KEY = 'karnehan-pos:supabase:cfg:v1';
+const SB_LAST_KEY = 'karnehan-pos:supabase:last:v1';
+
+const SQL_SCHEMA = `-- Run this in Supabase Dashboard > SQL Editor:
+create table if not exists public.meat_pos_backups (
+  id uuid primary key default gen_random_uuid(),
+  created_at timestamptz not null default now(),
+  device_name text default 'Browser POS',
+  customer_count integer not null default 0,
+  sale_count integer not null default 0,
+  total_receivables numeric(12,2) not null default 0,
+  payload jsonb not null
+);
+
+alter table public.meat_pos_backups enable row level security;
+
+create policy "Allow anon insert backups" on public.meat_pos_backups for insert to anon, authenticated with check (true);
+create policy "Allow anon select backups" on public.meat_pos_backups for select to anon, authenticated using (true);
+create policy "Allow anon delete backups" on public.meat_pos_backups for delete to anon, authenticated using (true);`;
+
+function loadSbCfg() {
+  try {
+    return JSON.parse(localStorage.getItem(SB_CFG_KEY)) || { url: '', key: '', autoSync: false };
+  } catch {
+    return { url: '', key: '', autoSync: false };
+  }
+}
+
+let sbCfg = loadSbCfg();
+let sbLastBackup = localStorage.getItem(SB_LAST_KEY) || null;
+
+function saveSbCfg(cfg) {
+  sbCfg = { ...sbCfg, ...cfg };
+  localStorage.setItem(SB_CFG_KEY, JSON.stringify(sbCfg));
+  renderSbStatus();
+}
+
+function renderSbStatus() {
+  const isConfigured = Boolean(sbCfg.url && sbCfg.key);
+  const badge = $('#sb-status-badge');
+  const text = $('#sb-status-text');
+  const lastSync = $('#sb-last-sync');
+  const actions = $('#sb-actions');
+  const quickBtn = $('#sb-backup-quick');
+
+  if (isConfigured) {
+    if (badge) {
+      badge.textContent = 'Active';
+      badge.className = 'rounded-full bg-emerald-100 px-2 py-0.5 text-[10px] font-bold text-emerald-800 ring-1 ring-emerald-300';
+    }
+    if (text) {
+      try {
+        const host = new URL(sbCfg.url).hostname.split('.')[0];
+        text.textContent = `Connected: ${host}`;
+      } catch {
+        text.textContent = 'Connected';
+      }
+    }
+    if (actions) actions.hidden = false;
+    if (quickBtn) quickBtn.disabled = false;
+  } else {
+    if (badge) {
+      badge.textContent = 'Off';
+      badge.className = 'rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-bold text-stone-600';
+    }
+    if (text) text.textContent = 'Not configured';
+    if (actions) actions.hidden = true;
+  }
+
+  if (lastSync) {
+    lastSync.textContent = sbLastBackup
+      ? `Last cloud backup: ${fmtDate(sbLastBackup)}`
+      : 'Last cloud backup: Never';
+  }
+
+  renderSaveStatus();
+}
+
+async function backupToSupabase(silent = false) {
+  if (!sbCfg.url || !sbCfg.key) {
+    if (!silent) toast('Please set up Supabase URL and Key first.', 'error');
+    return false;
+  }
+  if (!navigator.onLine) {
+    if (!silent) toast('Offline — cannot reach Supabase right now.', 'error');
+    return false;
+  }
+
+  const endpoint = `${sbCfg.url.replace(/\/+$/, '')}/rest/v1/meat_pos_backups`;
+  const snapshot = {
+    app: 'karnehan-pos',
+    version: 1,
+    savedAt: new Date().toISOString(),
+    customers: db.customers,
+    txns: db.txns,
+    prices: db.prices || {},
+  };
+
+  const body = {
+    device_name: navigator.userAgent.includes('Mobile') ? 'Mobile Phone' : 'Desktop POS',
+    customer_count: db.customers.length,
+    sale_count: db.txns.length,
+    total_receivables: totalReceivables() / 100,
+    payload: snapshot,
+  };
+
+  try {
+    const res = await fetch(endpoint, {
+      method: 'POST',
+      headers: {
+        'apikey': sbCfg.key,
+        'Authorization': `Bearer ${sbCfg.key}`,
+        'Content-Type': 'application/json',
+        'Prefer': 'return=representation',
+      },
+      body: JSON.stringify(body),
+    });
+
+    if (!res.ok) {
+      const errText = await res.text();
+      throw new Error(errText || `HTTP ${res.status}`);
+    }
+
+    sbLastBackup = new Date().toISOString();
+    localStorage.setItem(SB_LAST_KEY, sbLastBackup);
+    renderSbStatus();
+    if (!silent) toast('☁️ Backed up successfully to Supabase!', 'success');
+    loadSbSnapshots();
+    return true;
+  } catch (err) {
+    console.error('Supabase backup error:', err);
+    if (!silent) toast(`Cloud backup failed: ${err.message || 'Network error'}`, 'error');
+    return false;
+  }
+}
+
+async function loadSbSnapshots() {
+  const listEl = $('#sb-snapshots');
+  const countBadge = $('#sb-count-badge');
+  if (!listEl) return;
+
+  if (!sbCfg.url || !sbCfg.key) {
+    listEl.innerHTML = '<li class="text-xs text-stone-400 py-2">Set up credentials above to view cloud backups.</li>';
+    if (countBadge) countBadge.textContent = '';
+    return;
+  }
+  if (!navigator.onLine) {
+    listEl.innerHTML = '<li class="text-xs text-stone-400 py-2">Device is offline. Connect to internet to view cloud backups.</li>';
+    return;
+  }
+
+  listEl.innerHTML = '<li class="text-xs text-stone-500 py-2">Loading cloud backups…</li>';
+  const endpoint = `${sbCfg.url.replace(/\/+$/, '')}/rest/v1/meat_pos_backups?select=id,created_at,device_name,customer_count,sale_count,total_receivables&order=created_at.desc&limit=10`;
+
+  try {
+    const res = await fetch(endpoint, {
+      headers: {
+        'apikey': sbCfg.key,
+        'Authorization': `Bearer ${sbCfg.key}`,
+      },
+    });
+
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    if (countBadge) countBadge.textContent = `${rows.length} snapshot${rows.length === 1 ? '' : 's'}`;
+
+    if (!rows.length) {
+      listEl.innerHTML = '<li class="text-xs text-stone-400 py-3 text-center rounded-xl bg-stone-100">No cloud backups found yet. Tap "Backup Now" above.</li>';
+      return;
+    }
+
+    listEl.innerHTML = rows.map((r) => `
+      <li class="flex items-center justify-between gap-2 rounded-xl border border-stone-200 bg-white p-3 text-xs">
+        <div class="min-w-0">
+          <p class="font-bold text-stone-800">${fmtDate(r.created_at)}</p>
+          <p class="text-[11px] text-stone-500">${esc(r.device_name || 'POS')} · ${r.customer_count} customers · ${r.sale_count} sales · ₱${Number(r.total_receivables).toFixed(2)} debt</p>
+        </div>
+        <button type="button" data-act="sb-restore" data-id="${r.id}" class="rounded-lg bg-stone-100 px-3 py-1.5 font-bold text-stone-700 hover:bg-emerald-50 hover:text-emerald-800 active:scale-95">
+          Restore
+        </button>
+      </li>
+    `).join('');
+  } catch (err) {
+    listEl.innerHTML = `<li class="text-xs text-red-600 py-2">Could not load backups: ${esc(err.message)}</li>`;
+  }
+}
+
+async function restoreFromSupabase(id) {
+  if (!confirm('Restore this cloud backup? Your current local data will be replaced by the snapshot.')) return;
+
+  const endpoint = `${sbCfg.url.replace(/\/+$/, '')}/rest/v1/meat_pos_backups?id=eq.${id}&select=payload`;
+  try {
+    const res = await fetch(endpoint, {
+      headers: {
+        'apikey': sbCfg.key,
+        'Authorization': `Bearer ${sbCfg.key}`,
+      },
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const rows = await res.json();
+    if (!rows.length || !rows[0].payload) throw new Error('Backup payload missing');
+
+    const d = rows[0].payload;
+    if (!Array.isArray(d.customers) || !Array.isArray(d.txns)) throw new Error('Invalid backup format');
+
+    db = { customers: d.customers, txns: d.txns, prices: d.prices || {} };
+    save();
+    sbDlg.close();
+    menuDlg.close();
+    render();
+    toast(`Restored cloud backup (${d.customers.length} customers, ${d.txns.length} sales)`, 'success');
+  } catch (err) {
+    toast(`Restore failed: ${err.message}`, 'error');
+  }
+}
+
+let autoBackupTimer;
+function scheduleAutoBackup() {
+  if (!sbCfg.url || !sbCfg.key || !sbCfg.autoSync || !navigator.onLine) return;
+  clearTimeout(autoBackupTimer);
+  autoBackupTimer = setTimeout(() => {
+    backupToSupabase(true);
+  }, 4000);
+}
+
+// Supabase UI event wiring
+$('#sb-open-cfg')?.addEventListener('click', () => {
+  $('#sb-url').value = sbCfg.url || '';
+  $('#sb-key').value = sbCfg.key || '';
+  $('#sb-auto-sync').checked = Boolean(sbCfg.autoSync);
+  const sqlCode = $('#sb-sql-code');
+  if (sqlCode) sqlCode.textContent = SQL_SCHEMA;
+  sbDlg.showModal();
+  loadSbSnapshots();
+});
+
+$('#sb-backup-quick')?.addEventListener('click', () => {
+  if (!sbCfg.url || !sbCfg.key) {
+    $('#sb-open-cfg').click();
+  } else {
+    backupToSupabase(false);
+  }
+});
+
+$('#sb-backup-btn')?.addEventListener('click', () => backupToSupabase(false));
+$('#sb-refresh-btn')?.addEventListener('click', () => loadSbSnapshots());
+
+$('#sb-copy-sql')?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(SQL_SCHEMA);
+    toast('SQL copied to clipboard!', 'success');
+  } catch {
+    toast('Could not copy automatically', 'error');
+  }
+});
+
+$('#sb-form')?.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const url = $('#sb-url').value.trim().replace(/\/+$/, '');
+  const key = $('#sb-key').value.trim();
+  const autoSync = $('#sb-auto-sync').checked;
+
+  if (!url || !key) {
+    toast('Please enter both Supabase URL and Key', 'error');
+    return;
+  }
+
+  saveSbCfg({ url, key, autoSync });
+  toast('Checking connection…', 'info');
+
+  try {
+    const res = await fetch(`${url}/rest/v1/meat_pos_backups?select=id&limit=1`, {
+      headers: {
+        'apikey': key,
+        'Authorization': `Bearer ${key}`,
+      },
+    });
+
+    if (res.ok) {
+      toast('✓ Connected to Supabase!', 'success');
+      loadSbSnapshots();
+    } else {
+      const errText = await res.text();
+      toast(`Warning: HTTP ${res.status}. Check if table exists.`, 'error');
+    }
+  } catch (err) {
+    toast(`Connection failed: ${err.message}`, 'error');
+  }
+});
+
 // ───────────────────────── Global events ─────────────────────────
 document.addEventListener('click', (e) => {
+  const sbRestoreBtn = e.target.closest('[data-act="sb-restore"]');
+  if (sbRestoreBtn) {
+    restoreFromSupabase(sbRestoreBtn.dataset.id);
+    return;
+  }
   const tabBtn = e.target.closest('[data-tab]');
   if (tabBtn) { ui.tab = tabBtn.dataset.tab; render(); window.scrollTo({ top: 0 }); return; }
 
@@ -1048,12 +1347,13 @@ $('#led-sort').addEventListener('change', (e) => { ui.lsort = e.target.value; re
 
 // Keep multiple tabs in sync.
 window.addEventListener('storage', (e) => { if (e.key === DB_KEY) { db = loadDb(); render(); } });
-window.addEventListener('online', renderSaveStatus);
-window.addEventListener('offline', renderSaveStatus);
+window.addEventListener('online', () => { renderSaveStatus(); renderSbStatus(); });
+window.addEventListener('offline', () => { renderSaveStatus(); renderSbStatus(); });
 
 // ───────────────────────── Boot ─────────────────────────
 render();
 renderSaveStatus();
+renderSbStatus();
 navigator.storage?.persist?.().catch(() => {});
 if ('serviceWorker' in navigator && location.protocol.startsWith('http')) {
   navigator.serviceWorker.register('sw.js').catch(() => {});

@@ -269,15 +269,92 @@
         <h2 id="menu-title" class="text-lg font-bold">Data &amp; Backup</h2>
         <button type="button" data-close class="grid size-9 place-items-center rounded-full bg-stone-100 text-stone-600 hover:bg-stone-200" aria-label="Close">✕</button>
       </header>
-      <div class="relative flex-1 min-h-0 space-y-2 overflow-y-auto px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
+      <div class="relative flex-1 min-h-0 space-y-3 overflow-y-auto px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
         <p id="menu-stats" class="rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600"></p>
+
+        <!-- Supabase Cloud Backup Card -->
+        <div class="rounded-2xl border border-sky-200 bg-sky-50/80 p-3.5 ring-1 ring-sky-300/40">
+          <div class="flex items-center justify-between gap-2">
+            <div class="flex items-center gap-2">
+              <span class="text-xl" aria-hidden="true">☁️</span>
+              <div>
+                <h3 class="text-xs font-bold uppercase tracking-wider text-sky-950">Supabase Cloud Backup</h3>
+                <p id="sb-status-text" class="text-xs text-sky-700">Not configured</p>
+              </div>
+            </div>
+            <span id="sb-status-badge" class="rounded-full bg-stone-200 px-2 py-0.5 text-[10px] font-bold text-stone-600">Off</span>
+          </div>
+          <p id="sb-last-sync" class="mt-2 text-[11px] text-stone-500">Last backup: Never</p>
+          <div class="mt-3 grid grid-cols-2 gap-2">
+            <button type="button" id="sb-backup-quick" class="btn-primary py-2 text-xs">☁️ Backup Now</button>
+            <button type="button" id="sb-open-cfg" class="btn-secondary py-2 text-xs">⚙️ Settings</button>
+          </div>
+        </div>
+
         <button type="button" data-act="export" class="menu-item">⬇️ <span><b>Export backup</b><br><span class="text-xs text-stone-500">Download all data as a JSON file</span></span></button>
         <label class="menu-item cursor-pointer">⬆️ <span><b>Import backup</b><br><span class="text-xs text-stone-500">Restore from a JSON file (replaces current data)</span></span>
           <input id="import-file" type="file" accept="application/json,.json" class="sr-only">
         </label>
         <button type="button" data-act="sample" class="menu-item">🧪 <span><b>Load sample data</b><br><span class="text-xs text-stone-500">Demo customers with multi-batch rollover debts</span></span></button>
         <button type="button" data-act="reset" class="menu-item text-red-700">🗑️ <span><b>Erase all data</b><br><span class="text-xs text-red-500">Permanently delete everything on this device</span></span></button>
-        <p class="pt-2 text-center text-xs text-stone-400">All records are stored only in this browser (localStorage). Export backups regularly.</p>
+        <p class="pt-2 text-center text-xs text-stone-400">All records are stored primarily on this device. Cloud backup provides secure remote recovery.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- ===================== SUPABASE BACKUP DIALOG ===================== -->
+  <dialog id="supabase-dialog" class="sheet" closedby="any" aria-labelledby="sb-title">
+    <div class="flex max-h-[92dvh] flex-col">
+      <header class="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+        <div class="flex items-center gap-2">
+          <span class="text-xl" aria-hidden="true">☁️</span>
+          <h2 id="sb-title" class="text-lg font-bold">Supabase Cloud Backup</h2>
+        </div>
+        <button type="button" data-close class="grid size-9 place-items-center rounded-full bg-stone-100 text-stone-600 hover:bg-stone-200" aria-label="Close">✕</button>
+      </header>
+
+      <div class="relative flex-1 min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 py-4 pb-6">
+        <!-- Configuration form -->
+        <form id="sb-form" novalidate class="space-y-3 rounded-2xl bg-stone-50 p-4 ring-1 ring-stone-200">
+          <div>
+            <label for="sb-url" class="label">Project URL</label>
+            <input id="sb-url" type="url" placeholder="https://yourproject.supabase.co" autocomplete="off" class="field text-xs font-mono">
+          </div>
+          <div>
+            <label for="sb-key" class="label">Anon / Public API Key</label>
+            <input id="sb-key" type="password" placeholder="eyJhbGciOiJIUzI1NiIsIn..." autocomplete="off" class="field text-xs font-mono">
+          </div>
+          <div class="flex items-center justify-between pt-1">
+            <label class="flex cursor-pointer items-center gap-2 text-xs font-semibold text-stone-700">
+              <input id="sb-auto-sync" type="checkbox" class="size-4 rounded text-red-600">
+              Auto-backup on changes
+            </label>
+            <button type="submit" id="sb-save-btn" class="btn-primary py-2 px-3 text-xs">Save &amp; Connect</button>
+          </div>
+        </form>
+
+        <!-- Backup actions -->
+        <div id="sb-actions" class="grid grid-cols-2 gap-2" hidden>
+          <button type="button" id="sb-backup-btn" class="btn-success text-xs font-bold py-2.5">☁️ Backup Now</button>
+          <button type="button" id="sb-refresh-btn" class="btn-secondary text-xs font-bold py-2.5">🔄 Refresh List</button>
+        </div>
+
+        <!-- Snapshots list -->
+        <div>
+          <div class="flex items-center justify-between">
+            <h3 class="label mb-0">Saved Cloud Backups</h3>
+            <span id="sb-count-badge" class="text-xs text-stone-400"></span>
+          </div>
+          <ul id="sb-snapshots" class="mt-2 space-y-2"></ul>
+        </div>
+
+        <!-- SQL Schema Guide Accordion -->
+        <details class="rounded-xl border border-stone-200 bg-white p-3 text-xs text-stone-600">
+          <summary class="cursor-pointer font-bold text-stone-800">📋 SQL Setup for your Supabase Database</summary>
+          <p class="mt-2 text-stone-500">Go to your Supabase Dashboard &gt; <b>SQL Editor</b> &gt; <b>New Query</b>, paste this SQL and click <b>Run</b>:</p>
+          <pre class="mt-2 max-h-36 overflow-x-auto rounded-lg bg-stone-900 p-2.5 text-[11px] text-stone-100 font-mono" id="sb-sql-code"></pre>
+          <button type="button" id="sb-copy-sql" class="mt-2 inline-flex items-center gap-1 rounded-lg bg-stone-100 px-3 py-1.5 font-bold text-stone-700 hover:bg-stone-200">📋 Copy SQL</button>
+        </details>
       </div>
     </div>
   </dialog>
