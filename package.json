@@ -1,0 +1,16 @@
+{
+  "name": "meat-shop-pos",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Offline-first Meat Shop POS & Customer Credit Ledger (Tailwind CSS + vanilla JS, localStorage)",
+  "scripts": {
+    "build": "tailwindcss -i ./src/input.css -o ./styles.css --minify",
+    "dev": "tailwindcss -i ./src/input.css -o ./styles.css --watch",
+    "start": "npx -y serve -l 5173 ."
+  },
+  "license": "ISC",
+  "devDependencies": {
+    "@tailwindcss/cli": "^4.3.3",
+    "tailwindcss": "^4.3.3"
+  }
+}

@@ -1,0 +1,62 @@
+@import "tailwindcss";
+
+@layer components {
+  .field {
+    @apply w-full rounded-xl border border-stone-300 bg-white px-3 py-2.5 text-base text-stone-900 outline-none placeholder:text-stone-400 focus:border-red-500 focus:ring-2 focus:ring-red-500/25;
+  }
+  .label {
+    @apply mb-1.5 block text-xs font-semibold tracking-wide text-stone-600 uppercase;
+  }
+  .chip {
+    @apply shrink-0 rounded-full border border-stone-300 bg-white px-3 py-1.5 text-xs font-semibold whitespace-nowrap text-stone-700 hover:bg-stone-50 active:scale-95 aria-pressed:border-red-600 aria-pressed:bg-red-600 aria-pressed:text-white;
+  }
+  .btn-primary {
+    @apply rounded-xl bg-red-600 px-4 py-3 text-sm font-bold text-white shadow-sm hover:bg-red-700 active:scale-[.98] disabled:opacity-40;
+  }
+  .btn-secondary {
+    @apply rounded-xl bg-stone-100 px-4 py-3 text-sm font-bold text-stone-800 hover:bg-stone-200 active:scale-[.98] disabled:opacity-40;
+  }
+  .btn-success {
+    @apply rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 active:scale-[.98] disabled:opacity-40;
+  }
+  .btn-collect {
+    @apply inline-flex items-center gap-1.5 rounded-xl bg-emerald-600 px-3.5 py-2 text-sm font-bold text-white shadow-sm hover:bg-emerald-700 active:scale-95;
+  }
+  .tab-btn {
+    @apply flex flex-col items-center gap-0.5 py-2.5 text-[11px] font-semibold text-stone-500 aria-[current=page]:text-red-700;
+  }
+  .pay-opt {
+    @apply relative flex cursor-pointer items-center gap-3 rounded-2xl border-2 border-stone-200 bg-white p-3 transition has-checked:border-red-600 has-checked:bg-red-50 has-focus-visible:ring-2 has-focus-visible:ring-red-500/40;
+  }
+  .cut-opt {
+    @apply relative flex cursor-pointer flex-col rounded-xl border-2 border-stone-200 bg-white px-3 py-2 transition has-checked:border-red-600 has-checked:bg-red-50 has-focus-visible:ring-2 has-focus-visible:ring-red-500/40;
+  }
+  .menu-item {
+    @apply flex w-full items-center gap-3 rounded-xl border border-stone-200 bg-white px-4 py-3 text-left text-sm hover:bg-stone-50;
+  }
+
+  /* Bottom sheet on mobile, centered card on larger screens */
+  .sheet {
+    @apply mx-auto mt-auto mb-0 w-full max-w-lg overflow-hidden border-0 outline-none overscroll-contain rounded-t-3xl bg-white p-0 text-stone-900 shadow-2xl backdrop:bg-stone-950/60 backdrop:backdrop-blur-[2px] sm:mb-auto sm:rounded-3xl;
+    max-height: 92dvh;
+  }
+  .sheet[open] {
+    animation: sheet-up 0.22s ease-out;
+  }
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(40px); opacity: 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .sheet[open] { animation: none; }
+}
+
+/* Lock page scroll while a modal is open */
+body:has(dialog[open]) {
+  overflow: hidden;
+}
+
+.no-scrollbar { scrollbar-width: none; }
+.no-scrollbar::-webkit-scrollbar { display: none; }

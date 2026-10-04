@@ -1,0 +1,287 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#b91c1c">
+  <meta name="description" content="Offline-first meat shop POS and customer credit (utang) ledger.">
+  <title>Karnehan POS · Meat Shop Credit Ledger</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body class="min-h-dvh bg-stone-100 text-stone-900 antialiased">
+
+  <!-- ===================== HEADER ===================== -->
+  <header class="sticky top-0 z-20 bg-linear-to-br from-red-700 to-rose-900 text-white shadow-lg">
+    <div class="mx-auto max-w-lg px-4 pt-[max(env(safe-area-inset-top),0.75rem)] pb-3">
+      <div class="flex items-center justify-between gap-3">
+        <div class="flex items-center gap-2.5">
+          <span class="grid size-10 place-items-center rounded-xl bg-white/15 text-2xl" aria-hidden="true">🥩</span>
+          <div>
+            <h1 class="text-lg leading-tight font-bold tracking-tight">Karnehan POS</h1>
+            <p id="save-status" class="text-xs text-red-100">Saved on this device</p>
+          </div>
+        </div>
+        <button id="menu-btn" type="button" class="grid size-10 place-items-center rounded-xl bg-white/10 hover:bg-white/20 focus-visible:outline-2 focus-visible:outline-white" aria-label="Data &amp; backup menu">
+          <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path stroke-linecap="round" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        </button>
+      </div>
+
+      <!-- Period / batch switcher (Sales Register only) -->
+      <div id="period-bar" class="mt-3">
+        <div class="flex items-center justify-between">
+          <button type="button" data-act="month-prev" class="grid size-8 place-items-center rounded-lg hover:bg-white/15 disabled:opacity-30" aria-label="Previous month">
+            <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m15 18-6-6 6-6"/></svg>
+          </button>
+          <p id="month-label" class="text-sm font-semibold" aria-live="polite"></p>
+          <button type="button" data-act="month-next" class="grid size-8 place-items-center rounded-lg hover:bg-white/15 disabled:opacity-30" aria-label="Next month">
+            <svg class="size-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="m9 18 6-6-6-6"/></svg>
+          </button>
+        </div>
+        <div id="batch-chips" class="mt-2 grid grid-cols-5 gap-1.5" role="group" aria-label="Select batch"></div>
+      </div>
+      <p id="ledger-bar" class="mt-3 hidden rounded-xl bg-white/10 px-3 py-2 text-xs text-red-50">
+        Customer balances roll over across <b>all batches &amp; months</b>. Unpaid amounts carry forward until collected.
+      </p>
+    </div>
+  </header>
+
+  <!-- ===================== MAIN ===================== -->
+  <main class="mx-auto max-w-lg px-4 pb-36">
+    <section id="summary" class="grid grid-cols-2 gap-3 pt-4 sm:grid-cols-3" aria-label="Summary"></section>
+
+    <!-- Sales Register -->
+    <section id="view-register" aria-labelledby="register-title" class="mt-5">
+      <div class="flex items-end justify-between gap-2">
+        <h2 id="register-title" class="text-base font-bold">Sales Register</h2>
+        <p id="register-sub" class="text-xs text-stone-500"></p>
+      </div>
+      <div class="mt-2 space-y-2">
+        <label class="relative block">
+          <span class="sr-only">Search sales</span>
+          <svg class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="m20 20-3.5-3.5"/></svg>
+          <input id="reg-search" type="search" placeholder="Search customer or cut…" autocomplete="off" class="field pl-9">
+        </label>
+        <div id="reg-filters" class="no-scrollbar -mx-4 flex gap-2 overflow-x-auto px-4" role="group" aria-label="Filter by status"></div>
+      </div>
+      <ul id="txn-list" class="mt-3 space-y-3"></ul>
+    </section>
+
+    <!-- Customer Ledgers -->
+    <section id="view-ledgers" aria-labelledby="ledger-title" class="mt-5" hidden>
+      <div class="flex items-end justify-between gap-2">
+        <h2 id="ledger-title" class="text-base font-bold">Customer Ledgers</h2>
+        <p id="ledger-sub" class="text-xs text-stone-500"></p>
+      </div>
+      <div class="mt-2 space-y-2">
+        <label class="relative block">
+          <span class="sr-only">Search customers</span>
+          <svg class="pointer-events-none absolute top-1/2 left-3 size-4 -translate-y-1/2 text-stone-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path stroke-linecap="round" d="m20 20-3.5-3.5"/></svg>
+          <input id="led-search" type="search" placeholder="Search customer…" autocomplete="off" class="field pl-9">
+        </label>
+        <div class="flex items-center justify-between gap-2">
+          <div id="led-filters" class="flex gap-2" role="group" aria-label="Customer filter"></div>
+          <label class="flex items-center gap-1 text-xs text-stone-500">
+            Sort
+            <select id="led-sort" class="rounded-lg border border-stone-300 bg-white px-2 py-1.5 text-sm text-stone-800">
+              <option value="debt">Highest debt</option>
+              <option value="recent">Recent activity</option>
+              <option value="name">Name A–Z</option>
+            </select>
+          </label>
+        </div>
+      </div>
+      <ul id="cust-list" class="mt-3 space-y-3"></ul>
+    </section>
+  </main>
+
+  <!-- ===================== BOTTOM NAV ===================== -->
+  <nav class="fixed inset-x-0 bottom-0 z-30 border-t border-stone-200 bg-white/95 pb-[env(safe-area-inset-bottom)] backdrop-blur" aria-label="Main">
+    <div class="mx-auto grid max-w-lg grid-cols-3 items-end px-2">
+      <button type="button" data-tab="register" class="tab-btn">
+        <svg class="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><rect x="5" y="3" width="14" height="18" rx="2"/><path stroke-linecap="round" d="M9 8h6M9 12h6M9 16h3"/></svg>
+        Sales Register
+      </button>
+      <div class="flex flex-col items-center pb-2">
+        <button id="fab" type="button" class="-mt-7 grid size-16 place-items-center rounded-full bg-red-600 text-white shadow-lg shadow-red-600/40 ring-4 ring-white transition hover:bg-red-700 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-red-600 active:scale-95" aria-label="New sale">
+          <svg class="size-8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" d="M12 5v14M5 12h14"/></svg>
+        </button>
+        <span class="mt-1 text-[11px] font-semibold text-stone-600">New Sale</span>
+      </div>
+      <button type="button" data-tab="ledgers" class="tab-btn">
+        <svg class="size-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><circle cx="9" cy="8" r="3.5"/><path stroke-linecap="round" d="M2.5 20a6.5 6.5 0 0 1 13 0M16 4.5a3.5 3.5 0 0 1 0 7M18 14.5a6.5 6.5 0 0 1 3.5 5.5"/></svg>
+        Customer Ledgers
+      </button>
+    </div>
+  </nav>
+
+  <!-- Toast -->
+  <div id="toast" role="status" aria-live="polite" class="pointer-events-none fixed inset-x-0 bottom-28 z-50 flex justify-center px-4" hidden>
+    <p id="toast-msg" class="max-w-md rounded-xl px-4 py-3 text-sm font-medium text-white shadow-xl"></p>
+  </div>
+
+  <!-- ===================== NEW SALE DIALOG ===================== -->
+  <!-- No light-dismiss here, so a stray tap can't wipe a half-filled sale. Esc / ✕ still close it. -->
+  <dialog id="sale-dialog" class="sheet" aria-labelledby="sale-title">
+    <form id="sale-form" novalidate class="flex max-h-[92dvh] flex-col">
+      <header class="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+        <h2 id="sale-title" class="text-lg font-bold">New Sale</h2>
+        <button type="button" data-close class="grid size-9 place-items-center rounded-full bg-stone-100 text-stone-600 hover:bg-stone-200" aria-label="Close">✕</button>
+      </header>
+
+      <div class="relative flex-1 min-h-0 space-y-5 overflow-y-auto overscroll-contain px-5 py-4">
+        <!-- Customer -->
+        <div>
+          <label for="f-customer" class="label">Customer name</label>
+          <input id="f-customer" name="customer" list="customer-list" autocomplete="off" autocapitalize="words" enterkeyhint="next" placeholder="Choose existing or type a new name" class="field">
+          <datalist id="customer-list"></datalist>
+          <div id="f-recent" class="no-scrollbar -mx-5 mt-2 flex gap-2 overflow-x-auto px-5"></div>
+          <div id="f-cust-info" class="mt-2"></div>
+        </div>
+
+        <!-- Cut -->
+        <fieldset>
+          <legend class="label">Meat cut</legend>
+          <div id="f-cuts" class="grid grid-cols-2 gap-2"></div>
+          <input id="f-custom" name="customCut" placeholder="Custom cut name (e.g. Tuwalya, Batok)" autocapitalize="words" class="field mt-2" hidden>
+        </fieldset>
+
+        <!-- Weight & price -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="f-weight" class="label">Weight (kg)</label>
+            <input id="f-weight" name="weight" type="number" inputmode="decimal" step="any" min="0" placeholder="0.000" class="field tabular-nums">
+          </div>
+          <div>
+            <label for="f-price" class="label">Price per kg (₱)</label>
+            <input id="f-price" name="price" type="number" inputmode="decimal" step="any" min="0" placeholder="0.00" class="field tabular-nums">
+          </div>
+        </div>
+        <div class="-mt-3 flex flex-wrap gap-1.5" aria-label="Quick weights">
+          <button type="button" data-kg="0.25" class="chip">¼ kg</button>
+          <button type="button" data-kg="0.5" class="chip">½ kg</button>
+          <button type="button" data-kg="1" class="chip">1 kg</button>
+          <button type="button" data-kg="1.5" class="chip">1½ kg</button>
+          <button type="button" data-kg="2" class="chip">2 kg</button>
+          <button type="button" data-kg="5" class="chip">5 kg</button>
+        </div>
+
+        <div class="flex items-center justify-between rounded-2xl bg-stone-900 px-4 py-3 text-white">
+          <span class="text-sm text-stone-300">Total price</span>
+          <output id="f-total" for="f-weight f-price" class="text-2xl font-bold tabular-nums">₱0.00</output>
+        </div>
+
+        <!-- Payment type -->
+        <fieldset>
+          <legend class="label">Payment type</legend>
+          <div class="grid gap-2">
+            <label class="pay-opt">
+              <input type="radio" name="payType" value="cash" checked class="sr-only">
+              <span class="grid size-9 shrink-0 place-items-center rounded-full bg-emerald-100 text-lg" aria-hidden="true">💵</span>
+              <span><b class="block text-sm">Cash (Full)</b><span class="text-xs text-stone-500">Paid in full now</span></span>
+            </label>
+            <label class="pay-opt">
+              <input type="radio" name="payType" value="credit" class="sr-only">
+              <span class="grid size-9 shrink-0 place-items-center rounded-full bg-red-100 text-lg" aria-hidden="true">📒</span>
+              <span><b class="block text-sm">Full Credit (₱0 down)</b><span class="text-xs text-stone-500">Entire amount goes to utang</span></span>
+            </label>
+            <label class="pay-opt">
+              <input type="radio" name="payType" value="partial" class="sr-only">
+              <span class="grid size-9 shrink-0 place-items-center rounded-full bg-amber-100 text-lg" aria-hidden="true">🪙</span>
+              <span><b class="block text-sm">Credit with Downpayment</b><span class="text-xs text-stone-500">Partial payment now, rest on credit</span></span>
+            </label>
+          </div>
+        </fieldset>
+
+        <div id="f-partial" class="space-y-2 rounded-2xl bg-amber-50 p-4 ring-1 ring-amber-200" hidden>
+          <label for="f-cash" class="label">Cash received now (₱)</label>
+          <input id="f-cash" name="cash" type="number" inputmode="decimal" step="any" min="0" placeholder="0.00" class="field tabular-nums">
+          <p id="f-partial-msg" class="text-sm"></p>
+        </div>
+
+        <div id="f-cashbox" class="space-y-2 rounded-2xl bg-emerald-50 p-4 ring-1 ring-emerald-200">
+          <label for="f-tendered" class="label">Amount tendered (optional)</label>
+          <input id="f-tendered" name="tendered" type="number" inputmode="decimal" step="any" min="0" placeholder="For computing change" class="field tabular-nums">
+          <p id="f-change" class="text-sm"></p>
+        </div>
+
+        <div id="f-rollover"></div>
+
+        <!-- Batch -->
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label for="f-month" class="label">Month</label>
+            <select id="f-month" name="month" class="field"></select>
+          </div>
+          <div>
+            <label for="f-batch" class="label">Batch</label>
+            <select id="f-batch" name="batch" class="field"></select>
+          </div>
+        </div>
+
+        <div>
+          <label for="f-note" class="label">Note (optional)</label>
+          <input id="f-note" name="note" placeholder="e.g. for fiesta order, pickup Sat" class="field">
+        </div>
+      </div>
+
+      <footer class="grid grid-cols-2 gap-2 border-t border-stone-200 px-5 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+        <button type="button" id="f-save-more" class="btn-secondary">Save &amp; Add Cut</button>
+        <button type="submit" class="btn-primary">Save Sale</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ===================== COLLECT PAYMENT DIALOG ===================== -->
+  <dialog id="pay-dialog" class="sheet" closedby="any" aria-labelledby="pay-title">
+    <form id="pay-form" novalidate class="flex max-h-[92dvh] flex-col">
+      <header class="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+        <h2 id="pay-title" class="text-lg font-bold">Collect Payment</h2>
+        <button type="button" data-close class="grid size-9 place-items-center rounded-full bg-stone-100 text-stone-600 hover:bg-stone-200" aria-label="Close">✕</button>
+      </header>
+      <div class="relative flex-1 min-h-0 space-y-4 overflow-y-auto overscroll-contain px-5 py-4">
+        <div id="p-head"></div>
+        <div>
+          <label for="p-amount" class="label">Cash received (₱)</label>
+          <input id="p-amount" type="number" inputmode="decimal" step="any" min="0" placeholder="0.00" class="field text-2xl font-bold tabular-nums">
+          <div id="p-quick" class="mt-2 flex flex-wrap gap-1.5"></div>
+        </div>
+        <div id="p-preview"></div>
+      </div>
+      <footer class="grid grid-cols-2 gap-2 border-t border-stone-200 px-5 pt-3 pb-[max(env(safe-area-inset-bottom),0.75rem)]">
+        <button type="button" data-close class="btn-secondary">Cancel</button>
+        <button type="submit" id="p-submit" class="btn-success">Record Payment</button>
+      </footer>
+    </form>
+  </dialog>
+
+  <!-- ===================== DETAIL DIALOG (sale / customer ledger) ===================== -->
+  <dialog id="detail-dialog" class="sheet" closedby="any" aria-labelledby="detail-title">
+    <div id="detail-body" class="flex max-h-[92dvh] flex-col"></div>
+  </dialog>
+
+  <!-- ===================== MENU DIALOG ===================== -->
+  <dialog id="menu-dialog" class="sheet" closedby="any" aria-labelledby="menu-title">
+    <div class="flex max-h-[92dvh] flex-col">
+      <header class="flex items-center justify-between border-b border-stone-200 px-5 py-4">
+        <h2 id="menu-title" class="text-lg font-bold">Data &amp; Backup</h2>
+        <button type="button" data-close class="grid size-9 place-items-center rounded-full bg-stone-100 text-stone-600 hover:bg-stone-200" aria-label="Close">✕</button>
+      </header>
+      <div class="relative flex-1 min-h-0 space-y-2 overflow-y-auto px-5 py-4 pb-[max(env(safe-area-inset-bottom),1rem)]">
+        <p id="menu-stats" class="rounded-xl bg-stone-100 px-3 py-2 text-xs text-stone-600"></p>
+        <button type="button" data-act="export" class="menu-item">⬇️ <span><b>Export backup</b><br><span class="text-xs text-stone-500">Download all data as a JSON file</span></span></button>
+        <label class="menu-item cursor-pointer">⬆️ <span><b>Import backup</b><br><span class="text-xs text-stone-500">Restore from a JSON file (replaces current data)</span></span>
+          <input id="import-file" type="file" accept="application/json,.json" class="sr-only">
+        </label>
+        <button type="button" data-act="sample" class="menu-item">🧪 <span><b>Load sample data</b><br><span class="text-xs text-stone-500">Demo customers with multi-batch rollover debts</span></span></button>
+        <button type="button" data-act="reset" class="menu-item text-red-700">🗑️ <span><b>Erase all data</b><br><span class="text-xs text-red-500">Permanently delete everything on this device</span></span></button>
+        <p class="pt-2 text-center text-xs text-stone-400">All records are stored only in this browser (localStorage). Export backups regularly.</p>
+      </div>
+    </div>
+  </dialog>
+
+  <script src="app.js" type="module"></script>
+</body>
+</html>

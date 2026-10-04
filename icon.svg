@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="112" fill="#b91c1c"/>
+  <text x="256" y="330" font-size="260" text-anchor="middle" font-family="Apple Color Emoji,Segoe UI Emoji,Noto Color Emoji,sans-serif">🥩</text>
+  <text x="256" y="440" font-size="64" font-weight="800" fill="#fff" text-anchor="middle" font-family="system-ui,sans-serif">₱ POS</text>
+</svg>
